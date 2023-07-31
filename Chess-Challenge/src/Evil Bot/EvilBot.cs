@@ -4,8 +4,6 @@ using System.Linq;
 
 namespace ChessChallenge.Example
 {
-    // A simple bot that can spot mate in one, and always captures the most valuable piece it can.
-    // Plays randomly otherwise.
     public class EvilBot : IChessBot
     {
         // Piece values: null, pawn, knight, bishop, rook, queen, king
@@ -16,6 +14,7 @@ namespace ChessChallenge.Example
         ulong nodes = 0; //debug
         int maxPly = 0; //debug
         Move bestMove = new();
+        int maxTime = 0;
 
         struct TTEntry
         {
@@ -26,18 +25,18 @@ namespace ChessChallenge.Example
 
         const int NUM_ENTRIES = 1 << 23;
         readonly TTEntry[] TTable = new TTEntry[NUM_ENTRIES];
-        readonly long[,] history = new long[64, 64];
 
         public Move Think(Board board, Timer timer)
         {
             int bestScore = -INF;
+            maxTime = timer.MillisecondsRemaining / 300;
             for (int depth = 1; depth <= MAX_DEPTH; depth++)
             {
                 nodes = 0;
                 maxPly = 0;
                 bestScore = Math.Max(bestScore, Search(board, depth, -INF, INF, 0, timer));
 
-                if (timer.MillisecondsElapsedThisTurn * 300 > timer.MillisecondsRemaining) break;
+                if (timer.MillisecondsElapsedThisTurn > maxTime) break;
                 Console.WriteLine($"Evil depth {depth}; score {bestScore}; time {timer.MillisecondsElapsedThisTurn}; pv {bestMove}; nodes {nodes}; nps {nodes * 1000 / ((ulong)timer.MillisecondsElapsedThisTurn + 1)}; max ply {maxPly}");
             }
             Console.WriteLine();
@@ -54,9 +53,9 @@ namespace ChessChallenge.Example
             Move bestMove = new();
 
             if (ply > 0 && board.IsRepeatedPosition())
-                return -2000;
+                return 0;
 
-            if (timer.MillisecondsElapsedThisTurn * 300 > timer.MillisecondsRemaining)
+            if (timer.MillisecondsElapsedThisTurn > maxTime)
                 return 0;
 
             TTEntry entry = TTable[key % NUM_ENTRIES];
@@ -77,12 +76,13 @@ namespace ChessChallenge.Example
             // get and order moves
             Move[] moves = board.GetLegalMoves(isQsearch).OrderByDescending(move =>
                 move == entry.move ? 100000 : 0 +
-                (move.IsCapture ? 10000 + 10 * (int)move.CapturePieceType - (int)move.MovePieceType : 0) +
-                history[move.StartSquare.Index, move.TargetSquare.Index]
+                (move.IsCapture ? 10000 + 10 * (int)move.CapturePieceType - (int)move.MovePieceType : 0)
+            // TODO: research history/killers more
             ).ToArray();
 
             // check extentions
-            if (inCheck) depth++;
+            if (inCheck)
+                depth++;
 
             int origAlpha = alpha;
             for (int i = 0; i < moves.Length; i++)
@@ -120,13 +120,8 @@ namespace ChessChallenge.Example
                         alpha = eval;
 
                     if (alpha >= beta)
-                    {
-                        if (!move.IsCapture)
-                        {
-                            history[move.StartSquare.Index, move.TargetSquare.Index] += depth * depth;
-                        }
                         break;
-                    }
+
                 }
             }
             if (!isQsearch && moves.Length == 0)
